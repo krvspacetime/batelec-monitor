@@ -29,7 +29,9 @@ def upload_content_images(imgs: List[str | Path]):
     return images
 
 
-def get_structured_response(force: bool = False) -> PowerInterruptionsResponse:
+def get_structured_response(
+    force: bool = False, images: List[str | Path] = images
+) -> PowerInterruptionsResponse:
     if force:
         response = client.models.generate_content(
             model="gemini-2.0-flash",
