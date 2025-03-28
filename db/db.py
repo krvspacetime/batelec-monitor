@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
 from dotenv import load_dotenv
+from schemas.schemas import Base  # Import Base from schemas
 
 # Load environment variables
 load_dotenv()
@@ -16,11 +16,16 @@ engine = create_engine(DATABASE_URL)
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create base class for declarative models
-Base = declarative_base()
-
-# Initialize tables
-Base.metadata.create_all(engine)
+# Import all models to ensure they're registered with Base
+from schemas.schemas import (
+    Personnel,
+    AffectedCustomer,
+    SpecificActivity,
+    PowerInterruptionNotice,
+    AffectedArea,
+    Barangay,
+    PowerInterruptionData,
+)
 
 
 # Dependency to get DB session
@@ -30,3 +35,8 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# Create all tables if they don't exist
+def create_tables():
+    Base.metadata.create_all(bind=engine)

@@ -17,28 +17,22 @@ class PowerInterruptionNotice(BaseModel):
     )
 
 
-class InterruptionData(BaseModel):
-    date: str = Field(..., description="Date of the interruption")
-    day: str = Field(..., description="Day of the week")
-    time_range: str = Field(..., description="Time range of the interruption")
-    general_notes: Optional[str] = Field(
-        None, description="General notes about the interruption"
-    )
-    affected_area: str = Field(..., description="Area affected by the interruption")
-    affected_customers: List[str] = Field(..., description="List of affected customers")
-    reason: str = Field(..., description="Reason for the interruption")
-    affected_line: str = Field(..., description="Line affected by the interruption")
-    specific_activities: List[str] = Field(
-        ..., description="List of specific activities"
+class AffectedAreas(BaseModel):
+    name: str = Field(..., description="Name of the affected area")
+    barangays: List[str] = Field(
+        ..., description="List of barangays in the affected area"
     )
 
 
-class PowerInterruptionsResponse(BaseModel):
+class PowerInterruptionData(BaseModel):
+    is_update: bool = Field(..., description="Whether the response is an update")
     reason: str = Field(..., description="Reason for the interruption")
-    start_date: str = Field(..., description="Start date of the interruption")
+    date: str = Field(..., description="Start date of the interruption")
     start_time: str = Field(..., description="Start time of the interruption")
     end_time: str = Field(..., description="End time of the interruption")
-    affected_areas: List[str] = Field(..., description="List of affected areas")
+    affected_areas: List[AffectedAreas] = Field(
+        ..., description="List of affected areas"
+    )
     affected_customers: List[str] = Field(..., description="List of affected customers")
     affected_line: str = Field(..., description="Line affected by the interruption")
     specific_activities: List[str] = Field(

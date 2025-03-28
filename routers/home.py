@@ -1,15 +1,18 @@
 import shutil
 import uuid
-from fastapi import APIRouter, UploadFile, File
+
+from typing import List
+from fastapi import APIRouter, UploadFile, File, Depends
 from ai.gemini import get_structured_response
 from pathlib import Path
-from typing import List
+from sqlalchemy.orm import Session
+from db.db import get_db
 
 router = APIRouter()
 
 
 @router.get("/", tags=["Home"])
-async def home(force: bool = False):
+async def home(db: Session = Depends(get_db), force: bool = False):
     """
     Get the structured response from Gemini.
 
