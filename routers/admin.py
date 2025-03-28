@@ -1,3 +1,5 @@
+import traceback
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from db.db import get_db
@@ -209,7 +211,5 @@ def admin(db: Session = Depends(get_db), force: bool = False):
 
     except Exception as e:
         db.rollback()
-        import traceback
-
         traceback.print_exc()  # Print full traceback for debugging
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
