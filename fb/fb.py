@@ -1,6 +1,8 @@
 import json  # Import the json module
 import logging
+import os
 import time
+from pathlib import Path
 
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
@@ -33,6 +35,33 @@ POST_TEXT_CHILD_SPANS = (
 POST_IMAGE_SELECTOR = ".//img[contains(@src, 'https')]"  # Find img tags with https sources (filters data URIs)
 
 # --- End Configuration ---
+
+
+def safe_create_file(filename: str | Path, data: any, overwrite=False):
+    """Safely creates a file, avoiding overwriting existing files."""
+    if overwrite:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(data)
+        return filename
+    base_name, extension = filename.rsplit(".", 1)
+    if extension == "html":
+        counter = 1
+        while True:
+            new_filename = f"{base_name}_{counter}.{extension}"
+            if not os.path.exists(new_filename):
+                with open(new_filename, "w", encoding="utf-8") as f:
+                    f.write(data)
+                return new_filename
+            counter += 1
+    if extension == "json":
+        counter = 1
+        while True:
+            new_filename = f"{base_name}_{counter}.{extension}"
+            if not os.path.exists(new_filename):
+                with open(new_filename, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=4)
+                return new_filename
+            counter += 1
 
 
 def close_popups(driver, wait_time=3):
@@ -133,8 +162,6 @@ def extract_post_data(post_element):
             if src and src.startswith("https") and src not in seen_links:
                 # Basic filter: Avoid tiny profile pics often included in post header/comments
                 # This is heuristic - adjust classes/size checks if needed
-                parent = img.find_element(By.XPATH, "..")  # Get parent
-                parent_classes = parent.get_attribute("class") or ""
                 img_height = img.get_attribute("height")
                 img_width = img.get_attribute("width")
 
@@ -265,34 +292,22 @@ def scrape_facebook_page(
 
         # --- Save Extracted Data to JSON ---
         if all_posts_data:
-            logging.info(
-                f"Saving extracted data for {len(all_posts_data)} posts to {output_json_file}"
-            )
             # Structure the data as requested: {"posts": [list_of_post_dicts]}
             output_data = {"posts": all_posts_data}
-            with open(output_json_file, "w", encoding="utf-8") as f:
-                json.dump(output_data, f, ensure_ascii=False, indent=4)
+            filename = safe_create_file(output_json_file, output_data)
+            logging.info(f"JSON data saved as {filename}")
         else:
             logging.warning("No post data extracted to save to JSON.")
 
         # --- Save Full Page HTML ---
         logging.info("Getting full page source...")
         page_source = driver.page_source
-        with open(output_html_file, "w", encoding="utf-8") as file:
-            file.write(page_source)
-        logging.info(f"Page HTML saved as {output_html_file}")
+
+        filename = safe_create_file(output_html_file, page_source)
+        logging.info(f"Page HTML saved as {filename}")
 
     except Exception as e:
         logging.error(f"An error occurred during scraping: {e}")
-        try:
-            page_source_on_error = driver.page_source
-            error_filename = f"error_{output_html_file}"
-            with open(error_filename, "w", encoding="utf-8") as file:
-                file.write(page_source_on_error)
-            logging.info(f"Saved page source on error to {error_filename}")
-        except Exception as e_save:
-            logging.error(f"Could not save page source on error: {e_save}")
-
     finally:
         if "driver" in locals() and driver:
             driver.quit()
@@ -302,8 +317,8 @@ def scrape_facebook_page(
 if __name__ == "__main__":
     scrape_facebook_page(
         url="https://www.facebook.com/Batangas1ElectricCooperativeInc",
-        output_html_file="bateleco_page.html",
-        output_json_file="bateleco_data.json",  # Specify JSON filename
+        output_html_file="fb/bateleco_page.html",
+        output_json_file="fb/bateleco_data.json",  # Specify JSON filename
         sleep_time=6,
         max_scrolls=20,  # You might want fewer scrolls if focusing only on data
     )
