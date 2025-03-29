@@ -25,7 +25,10 @@ class AffectedAreas(BaseModel):
 
 
 class PowerInterruptionData(BaseModel):
-    is_update: bool = Field(..., description="Whether the response is an update")
+    is_power_interruption_related: bool = Field(
+        ..., description="Whether the response is an update"
+    )
+    date_created: str = Field(..., description="Date the response was created")
     reason: str = Field(..., description="Reason for the interruption")
     date: str = Field(..., description="Start date of the interruption")
     start_time: str = Field(..., description="Start time of the interruption")

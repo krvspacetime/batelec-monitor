@@ -2,27 +2,44 @@ import shutil
 import uuid
 
 from typing import List
-from fastapi import APIRouter, UploadFile, File, Depends
+from fastapi import APIRouter, UploadFile, File
 from ai.gemini import get_structured_response
 from pathlib import Path
-from sqlalchemy.orm import Session
-from db.db import get_db
+from pydantic import BaseModel
 
 router = APIRouter()
 
 
-@router.get("/", tags=["Home"])
-async def home(db: Session = Depends(get_db), force: bool = False):
+class HomeRequest(BaseModel):
+    force: bool = False
+    fb_post_text: str | None = None
+    fb_post_images: List[str | Path] = [
+        "data/img1.jpg",
+        "data/img2.jpg",
+        "data/img3.jpg",
+    ]
+
+
+@router.post("/", tags=["Home"])
+async def home(
+    request: HomeRequest,
+):
     """
     Get the structured response from Gemini.
 
     Args:
         force: Whether to force re-processing of the images, even if the response is cached. Defaults to False.
+        fb_post_text: Text from the Facebook post.
+        fb_post_images: List of image files to process.
 
     Returns:
         The structured response from Gemini.
     """
-    structured_response = get_structured_response(force=force)
+    structured_response = get_structured_response(
+        force=request.force,
+        fb_post_text=request.fb_post_text,
+        fb_post_images=request.fb_post_images,
+    )
     return structured_response
 
 

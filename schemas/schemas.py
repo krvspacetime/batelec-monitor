@@ -185,7 +185,8 @@ class PowerInterruptionData(Base):
     __tablename__ = "power_interruption_data"
 
     id = Column(Integer, primary_key=True, index=True)
-    is_update = Column(Boolean, nullable=False)
+    is_power_interruption_related = Column(Boolean, nullable=False)
+    date_created = Column(DateTime, default=datetime.utcnow)
     reason = Column(String, nullable=False)
     date = Column(DateTime, nullable=False)
     start_time = Column(DateTime, nullable=False)

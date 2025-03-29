@@ -24,7 +24,7 @@ from schemas.schemas import (
     PowerInterruptionNotice,
     AffectedArea,
     Barangay,
-    PowerInterruptionData,
+    PowerInterruptionData
 )
 
 
