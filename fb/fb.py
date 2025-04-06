@@ -1,4 +1,4 @@
-import json  # Import the json module
+import json
 import logging
 import os
 import time
@@ -37,8 +37,15 @@ POST_IMAGE_SELECTOR = ".//img[contains(@src, 'https')]"  # Find img tags with ht
 # --- End Configuration ---
 
 
-def safe_create_file(filename: str | Path, data: any, overwrite=False):
-    """Safely creates a file, avoiding overwriting existing files."""
+def safe_create_file(filename: str | Path, data: any, overwrite=False) -> str | Path:
+    """
+    Safely creates a file, avoiding overwriting existing files.
+
+    :param filename: The name of the file to create.
+    :param data: The data to write to the file.
+    :param overwrite: If True, overwrites existing files with the same name.
+    :return: The path to the created file.
+    """
     if overwrite:
         with open(filename, "w", encoding="utf-8") as f:
             f.write(data)
@@ -64,8 +71,13 @@ def safe_create_file(filename: str | Path, data: any, overwrite=False):
             counter += 1
 
 
-def close_popups(driver, wait_time=3):
-    """Attempts to find and click known pop-up buttons."""
+def close_popups(driver: webdriver.Chrome, wait_time: int = 3) -> None:
+    """
+    Attempts to find and click known pop-up buttons.
+
+    :param driver: The Selenium WebDriver instance.
+    :param wait_time: The maximum time to wait for elements to be clickable.
+    """
     # Try closing cookie banners
     for xpath in COOKIE_BUTTON_XPATHS:
         try:
@@ -194,7 +206,7 @@ def scrape_facebook_page(
     output_json_file: str = "facebook_data.json",  # New parameter for JSON output
     sleep_time: int = 5,
     max_scrolls: int = 15,
-):
+) -> None:
     """
     Scrapes a Facebook page, saves HTML, and extracts post data (text, images) to JSON.
     """

@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import home, admin
 from db.db import create_tables
+from routers import admin, home, scrape
 
 
 @asynccontextmanager
@@ -21,6 +22,7 @@ app = FastAPI(
 # Include routers
 app.include_router(home.router)
 app.include_router(admin.router)
+app.include_router(scrape.router)
 
 origins = [
     "http://localhost:5173",
