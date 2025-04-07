@@ -4,13 +4,11 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from db.db import create_tables
-from routers import admin, auth, crud, home, scrape
+from routers import admin, auth, crud, home, scrape, storage
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    create_tables()
     yield
 
 
@@ -25,6 +23,7 @@ app.include_router(admin.router)
 app.include_router(scrape.router)
 app.include_router(crud.router)
 app.include_router(auth.router)
+app.include_router(storage.router)
 
 origins = [
     "http://localhost:5173",

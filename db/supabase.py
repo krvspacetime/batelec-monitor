@@ -12,6 +12,7 @@ load_dotenv()
 # Get Supabase URL and key from environment variables
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_PUBLIC_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise ValueError(
@@ -19,7 +20,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     )
 
 # Create Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 # Security scheme for JWT authentication
 security = HTTPBearer()
@@ -85,7 +86,7 @@ async def get_current_user(
 
 
 async def verify_admin_role(
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Any = Depends(get_current_user),
     supabase_client: Client = Depends(get_supabase),
 ) -> Dict[str, Any]:
     """
@@ -102,26 +103,24 @@ async def verify_admin_role(
         HTTPException: If user does not have admin role
     """
     try:
+        user_id = None
+        if user and user.user:
+            user_id = user.user.id
         # Get user's role from Supabase
-        # This assumes you have a 'profiles' table with a 'role' column
         response = (
             supabase_client.table("profiles")
             .select("role")
-            .eq("id", user["id"])
+            .eq("id", user_id)
+            .single()
             .execute()
         )
 
-        if (
-            not response.data
-            or len(response.data) == 0
-            or response.data[0]["role"] != "admin"
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User does not have admin privileges",
-            )
-
-        return user
+        if response.data and response.data.get("role") == "admin":
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User does not have admin role",
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
