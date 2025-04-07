@@ -228,6 +228,17 @@ async def scrape_facebook(
             detail="Rate limit exceeded. Try again later.",
         )
 
+    # Validate URL format
+    if (
+        not scrape_request.url
+        or scrape_request.url == "string"
+        or not scrape_request.url.startswith("http")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid URL provided. URL must be a valid HTTP or HTTPS URL.",
+        )
+
     # Generate a unique task ID
     task_id = f"scrape_{int(time.time())}_{hash(scrape_request.url) % 10000}"
 

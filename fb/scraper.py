@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
+from urllib.parse import urlparse
 
 from selenium import webdriver
 from selenium.common.exceptions import (
@@ -351,6 +352,16 @@ def extract_post_data(
 
 
 # --- Main Scraper Function ---
+def is_valid_url(url: str) -> bool:
+    """Validate if the provided string is a valid URL."""
+    try:
+        result = urlparse(url)
+        # Check if scheme and netloc are present
+        return all([result.scheme, result.netloc])
+    except Exception:
+        return False
+
+
 def scrape_facebook_page(
     url: str,
     output_html_file: Optional[Union[str, Path]] = "facebook_page.html",
@@ -417,6 +428,13 @@ def scrape_facebook_page(
             "scrolls_performed": 0,
         },
     }
+
+    # Validate URL before proceeding
+    if not is_valid_url(url):
+        error_msg = f"Invalid URL provided: {url}"
+        logger.error(error_msg)
+        result["error"] = error_msg
+        return result
 
     start_time = time.time()
     driver = None
