@@ -1,8 +1,8 @@
+import datetime
 import json
 import logging
 import os
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 from urllib.parse import urlparse
@@ -17,7 +17,10 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from supabase import Client
 from webdriver_manager.chrome import ChromeDriverManager
+
+from db.supabase import UploadRequest, upload_to_bucket
 
 # --- Configuration ---
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -46,6 +49,8 @@ TIMESTAMP_SELECTORS = [
     ".//span[contains(@class, 'x4k7w5x') and contains(@class, 'x1h91t0o')]",  # Timestamp span
     ".//a[contains(@class, 'x1i10hfl') and contains(@href, '/permalink/')]",  # Permalink
 ]
+
+BUCKET_NAME = "scraper-data"
 
 
 # --- Logging Configuration ---
@@ -364,37 +369,66 @@ def is_valid_url(url: str) -> bool:
 
 def scrape_facebook_page(
     url: str,
-    output_html_file: Optional[Union[str, Path]] = "facebook_page.html",
-    output_json_file: Optional[Union[str, Path]] = "facebook_data.json",
+    supabase: Client | None = None,
+    # output_html_file and output_json_file args are now less relevant
+    # if always uploading to Supabase, but keep them if local saving is optional
+    # output_html_file: Optional[Union[str, Path]] = "facebook_page.html",
+    # output_json_file: Optional[Union[str, Path]] = "facebook_data.json",
+    target_folder: Optional[str] = None,  # Add arg for explicit folder name
     sleep_time: int = 5,
     max_scrolls: int = 15,
     headless: bool = True,
     log_file: Optional[str] = None,
     proxy: Optional[str] = None,
 ) -> Dict:
-    """Scrapes a Facebook page, saves HTML and JSON, and returns extracted data.
+    """Scrapes a Facebook page, uploads data to Supabase, and returns extracted data.
 
     Args:
-        url: Facebook page URL to scrape
-        output_html_file: Path to save HTML output (None to skip saving)
-        output_json_file: Path to save JSON output (None to skip saving)
-        sleep_time: Time to wait between scrolls in seconds
-        max_scrolls: Maximum number of page scrolls
-        headless: Whether to run browser in headless mode
-        log_file: Path to log file (None for console logging only)
-        proxy: Proxy server to use (format: 'http://user:pass@host:port')
+        url: Facebook page URL to scrape.
+        supabase: Initialized Supabase client instance. Required for uploading.
+        target_folder: Optional specific folder name in Supabase bucket.
+                       If None, a timestamp-based folder will be created.
+        sleep_time: Time to wait between scrolls in seconds.
+        max_scrolls: Maximum number of page scrolls.
+        headless: Whether to run browser in headless mode.
+        log_file: Path to log file (None for console logging only).
+        proxy: Proxy server to use (format: 'http://user:pass@host:port').
 
     Returns:
-        Dictionary containing the extracted data
+        Dictionary containing the extracted data and upload status.
     """
     # Setup logger
     logger = setup_logger(log_file)
     logger.info(f"Starting Facebook scraper for URL: {url}")
 
-    # Configure browser options
+    if supabase is None:
+        logger.error("Supabase client instance is required for uploading.")
+        # Return an error structure consistent with the success case
+        return {
+            "success": False,
+            "posts": [],
+            "error": "Supabase client not provided.",
+            "upload_info": None,
+            "stats": {"start_time": datetime.datetime.now().isoformat()},
+        }
+
+    # --- Determine Target Folder Name ---
+    # Use provided name or generate timestamp if None
+    actual_folder_name: str
+    if target_folder:
+        actual_folder_name = target_folder.strip("/")
+        logger.info(f"Using provided target folder: '{actual_folder_name}'")
+    else:
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        actual_folder_name = now_utc.strftime("%Y%m%d_%H%M%S_%f")
+        logger.info(f"Generated timestamp target folder: '{actual_folder_name}'")
+    # --- Folder Name Determined ---
+
+    # Configure browser options (keep your existing options setup)
     options = webdriver.ChromeOptions()
     if headless:
         options.add_argument("--headless=new")
+    # ... (add all your other options: gpu, window-size, sandbox, user-agent etc.) ...
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--no-sandbox")
@@ -403,12 +437,9 @@ def scrape_facebook_page(
     options.add_argument("--disable-notifications")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
-    # Set language preference to English to make selectors more predictable
     options.add_argument("--lang=en-US,en;q=0.9")
     prefs = {"intl.accept_languages": "en-US,en;q=0.9"}
     options.add_experimental_option("prefs", prefs)
-
-    # Add proxy if specified
     if proxy:
         options.add_argument(f"--proxy-server={proxy}")
         logger.info(f"Using proxy: {proxy}")
@@ -418,10 +449,15 @@ def scrape_facebook_page(
         "success": False,
         "posts": [],
         "error": None,
-        "html_file": None,
-        "json_file": None,
+        "upload_info": {  # Store upload details here
+            "bucket": BUCKET_NAME,
+            "folder": actual_folder_name,
+            "uploaded_files": [],
+        },
+        # "html_file": None, # Less relevant now, maybe store path within bucket
+        # "json_file": None, # Less relevant now, maybe store path within bucket
         "stats": {
-            "start_time": datetime.now().isoformat(),
+            "start_time": datetime.datetime.now().isoformat(),
             "end_time": None,
             "duration_seconds": None,
             "posts_found": 0,
@@ -440,45 +476,33 @@ def scrape_facebook_page(
     driver = None
 
     try:
-        # Initialize WebDriver
+        # Initialize WebDriver (keep your existing setup)
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
         driver.execute_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
 
-        # Load the page
+        # --- Load Page & Scroll ---
         logger.info(f"Loading page: {url}")
         driver.get(url)
         time.sleep(sleep_time)
-
-        # Close initial popups
         logger.info("Attempting to close initial pop-ups...")
         close_popups(driver, wait_time=5, logger=logger)
         time.sleep(2)
 
-        # Scroll to load more content
         last_height = driver.execute_script("return document.body.scrollHeight")
         scrolls = 0
         no_change_streak = 0
-
         while scrolls < max_scrolls:
             logger.info(f"Scrolling attempt {scrolls + 1}/{max_scrolls}")
-            close_popups(driver, wait_time=2, logger=logger)
+            close_popups(
+                driver, wait_time=2, logger=logger
+            )  # Close popups during scroll too
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(sleep_time)
-
             new_height = driver.execute_script("return document.body.scrollHeight")
-            try:
-                current_posts_count = len(
-                    driver.find_elements(By.XPATH, "//div[@role='article']")
-                )
-                logger.info(
-                    f"Found approx {current_posts_count} potential post elements on page."
-                )
-            except Exception:
-                logger.warning("Could not count post elements during scroll.")
-
+            # ... (keep your scroll height check logic) ...
             if new_height == last_height:
                 no_change_streak += 1
                 logger.warning(
@@ -493,13 +517,11 @@ def scrape_facebook_page(
                 last_height = new_height
                 no_change_streak = 0
                 logger.info(f"Scroll height increased to {new_height}.")
-
             scrolls += 1
             result["stats"]["scrolls_performed"] = scrolls
-
         time.sleep(3)  # Final wait
 
-        # Extract post data
+        # --- Extract Post Data ---
         logger.info("Finished scrolling. Finding post elements for data extraction...")
         post_elements = driver.find_elements(By.XPATH, "//div[@role='article']")
         logger.info(f"Found {len(post_elements)} final post elements to process.")
@@ -509,39 +531,90 @@ def scrape_facebook_page(
         for i, post_element in enumerate(post_elements):
             logger.info(f"Processing post {i+1}/{len(post_elements)}")
             post_data = extract_post_data(driver, post_element, logger)
-            # Only add if we actually found some text or images
             if post_data.get("text") or post_data.get("img_links"):
                 all_posts_data.append(post_data)
             else:
-                logger.warning(
-                    f"Post {i+1} did not yield text or images with current selectors."
+                logger.warning(f"Post {i+1} did not yield text or images.")
+
+        # --- Upload Extracted Post Data (JSON) ---
+        if all_posts_data:
+            # Define the structure for the JSON file content
+            output_data_json = {
+                "url": url,
+                "scraped_at": datetime.datetime.now().isoformat(),
+                "posts": all_posts_data,
+            }
+            # Define the filename within the bucket folder
+            json_filename = "extracted_posts.json"
+            logger.info(
+                f"Preparing to upload '{json_filename}' to folder '{actual_folder_name}'"
+            )
+
+            # Create the UploadRequest object for the JSON data
+            request_json = UploadRequest(
+                bucket=BUCKET_NAME,
+                folder=actual_folder_name,  # Use the determined folder name
+                data={
+                    json_filename: output_data_json
+                },  # Adhere to Dict[str, Any] structure
+            )
+            # Call the upload function
+            upload_response = upload_to_bucket(supabase, request_json)
+            logger.info(f"JSON data uploaded successfully. Response: {upload_response}")
+            # Add uploaded file path to results
+            if upload_response and result["upload_info"]:
+                result["upload_info"]["uploaded_files"].extend(
+                    [resp.get("path") for resp in upload_response if resp.get("path")]
                 )
 
-        # Save extracted data to JSON if output_json_file is provided
-        if all_posts_data and output_json_file:
-            # Structure the data as requested: {"posts": [list_of_post_dicts]}
-            output_data = {"posts": all_posts_data}
-            filename = safe_create_file(output_json_file, output_data)
-            logger.info(f"JSON data saved as {filename}")
-            result["json_file"] = str(filename)
-        elif not all_posts_data:
-            logger.warning("No post data extracted to save to JSON.")
+        else:
+            logger.warning("No post data extracted to upload.")
 
-        # Save full page HTML if output_html_file is provided
-        if output_html_file:
-            logger.info("Getting full page source...")
-            page_source = driver.page_source
-            filename = safe_create_file(output_html_file, page_source)
-            logger.info(f"Page HTML saved as {filename}")
-            result["html_file"] = str(filename)
+        # --- Upload Full Page HTML ---
+        logger.info("Getting full page source for HTML upload...")
+        page_source = driver.page_source
+        if page_source:
+            # Define the filename for the HTML file
+            html_filename = "page_source.html"
+            logger.info(
+                f"Preparing to upload '{html_filename}' to folder '{actual_folder_name}'"
+            )
 
-        # Update result with success and posts data
+            # Create the UploadRequest object for the HTML data
+            request_html = UploadRequest(
+                bucket=BUCKET_NAME,
+                folder=actual_folder_name,  # Use the SAME determined folder name
+                data={html_filename: page_source},  # Adhere to Dict[str, Any] structure
+            )
+            # Call the upload function
+            upload_response_html = upload_to_bucket(supabase, request_html)
+            logger.info(
+                f"HTML data uploaded successfully. Response: {upload_response_html}"
+            )
+            # Add uploaded file path to results
+            if upload_response_html and result["upload_info"]:
+                result["upload_info"]["uploaded_files"].extend(
+                    [
+                        resp.get("path")
+                        for resp in upload_response_html
+                        if resp.get("path")
+                    ]
+                )
+        else:
+            logger.warning("Could not retrieve page source for HTML upload.")
+
+        # Update final result
         result["success"] = True
-        result["posts"] = all_posts_data
+        result["posts"] = all_posts_data  # Keep the extracted posts in the result
 
     except Exception as e:
-        logger.error(f"An error occurred during scraping: {e}")
+        logger.error(
+            f"An error occurred during scraping: {e}", exc_info=True
+        )  # Log traceback
         result["error"] = str(e)
+        # Ensure success is False if an exception occurred before it was set
+        result["success"] = False
+
     finally:
         # Clean up
         if driver:
@@ -550,27 +623,10 @@ def scrape_facebook_page(
 
         # Update timing stats
         end_time = time.time()
-        result["stats"]["end_time"] = datetime.now().isoformat()
+        result["stats"]["end_time"] = datetime.datetime.now().isoformat()
         result["stats"]["duration_seconds"] = round(end_time - start_time, 2)
 
         logger.info(
-            f"Scraping completed in {result['stats']['duration_seconds']} seconds"
+            f"Scraping completed in {result['stats']['duration_seconds']} seconds. Success: {result['success']}"
         )
         return result
-
-
-if __name__ == "__main__":
-    # Example usage
-    result = scrape_facebook_page(
-        url="https://www.facebook.com/Batangas1ElectricCooperativeInc",
-        output_html_file="data/bateleco_page.html",
-        output_json_file="data/bateleco_data.json",
-        sleep_time=6,
-        max_scrolls=20,
-        log_file="logs/fb_scraper.log",
-    )
-
-    print(f"Scraping {'successful' if result['success'] else 'failed'}")
-    print(f"Found {len(result['posts'])} posts")
-    if result["error"]:
-        print(f"Error: {result['error']}")

@@ -6,4 +6,4 @@ data/*
 cache/*
 fb/*.html
 fb/*.json
-scraper.log
+*.log
