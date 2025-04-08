@@ -1,10 +1,8 @@
 import datetime
-import json
 import logging
 import os
 import time
-from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Dict, Optional
 from urllib.parse import urlparse
 
 from selenium import webdriver
@@ -79,59 +77,6 @@ def setup_logger(log_file: Optional[str] = None, level=logging.INFO) -> logging.
 
 # Initialize logger
 logger = setup_logger()
-
-
-# --- File Handling ---
-def safe_create_file(
-    filename: Union[str, Path], data: Any, overwrite: bool = False
-) -> Union[str, Path]:
-    """Safely creates a file, avoiding overwriting existing files unless specified."""
-    # Convert Path to string if needed for processing
-    filename_str = str(filename) if isinstance(filename, Path) else filename
-
-    # Handle direct overwrite case
-    if overwrite:
-        if isinstance(filename, Path):
-            # Ensure parent directory exists
-            filename.parent.mkdir(parents=True, exist_ok=True)
-
-            if filename_str.endswith(".json"):
-                with open(filename, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=4)
-            else:
-                with open(filename, "w", encoding="utf-8") as f:
-                    f.write(data)
-        else:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(filename_str) or ".", exist_ok=True)
-
-            if filename_str.endswith(".json"):
-                with open(filename_str, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=4)
-            else:
-                with open(filename_str, "w", encoding="utf-8") as f:
-                    f.write(data)
-        return filename
-
-    # Handle non-overwrite case with unique filename generation
-    base_name, extension = os.path.splitext(filename_str)
-    extension = extension.lstrip(".")
-
-    counter = 1
-    while True:
-        new_filename = f"{base_name}_{counter}.{extension}"
-        if not os.path.exists(new_filename):
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(new_filename) or ".", exist_ok=True)
-
-            if extension == "json":
-                with open(new_filename, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=4)
-            else:
-                with open(new_filename, "w", encoding="utf-8") as f:
-                    f.write(data)
-            return new_filename
-        counter += 1
 
 
 # --- Browser Interaction ---
@@ -370,10 +315,6 @@ def is_valid_url(url: str) -> bool:
 def scrape_facebook_page(
     url: str,
     supabase: Client | None = None,
-    # output_html_file and output_json_file args are now less relevant
-    # if always uploading to Supabase, but keep them if local saving is optional
-    # output_html_file: Optional[Union[str, Path]] = "facebook_page.html",
-    # output_json_file: Optional[Union[str, Path]] = "facebook_data.json",
     target_folder: Optional[str] = None,  # Add arg for explicit folder name
     sleep_time: int = 5,
     max_scrolls: int = 15,

@@ -8,8 +8,9 @@ from typing import Any, Dict, List
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from gotrue import UserResponse
 from pydantic import BaseModel, Field
-from supabase import Client, create_client
+from supabase import Client, PostgrestAPIResponse, create_client
 
 # Load environment variables
 load_dotenv()
@@ -103,47 +104,74 @@ async def get_current_user(
         )
 
 
-async def verify_admin_role(
-    user: Any = Depends(get_current_user),
-    supabase_client: Client = Depends(get_supabase),
-) -> Dict[str, Any]:
+def verify_admin_role(
+    supabase: Client = Depends(get_supabase),
+    current_user: UserResponse = Depends(get_current_user),
+) -> UserResponse:  # Return the user data if verification passes
     """
-    Verify that the authenticated user has admin role.
-
-    Args:
-        user: User information from get_current_user dependency
-        supabase_client: Supabase client instance
-
-    Returns:
-        Dict[str, Any]: User information if user has admin role
-
-    Raises:
-        HTTPException: If user does not have admin role
+    FastAPI dependency that verifies if the current authenticated user
+    has the 'admin' role in the public.profiles table. (SYNC VERSION)
     """
+    # Extract user ID
+    # Corrected based on your note: current_user.user.id
+    user_id = current_user.user.id if current_user and current_user.user else None
+
+    if not user_id:
+        logger.warning("Could not extract user ID from UserResponse object.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate user credentials.",
+        )
+
+    logger.debug(f"Verifying admin role for user ID: {user_id}")
+
+    is_admin = False
     try:
-        user_id = None
-        if user and user.user:
-            user_id = user.user.id
-        # Get user's role from Supabase
-        response = (
-            supabase_client.table("profiles")
+        # Query the profiles table for the user's role
+        # REMOVE await keyword
+        response: PostgrestAPIResponse = (
+            supabase.table("profiles")
             .select("role")
-            .eq("id", user_id)
-            .single()
+            .eq("user_id", user_id)
+            .limit(1)
+            .maybe_single()
             .execute()
+        )  # No await here
+
+        # Check if profile exists and role is 'admin'
+        # response.data structure might differ slightly between sync/async, verify if needed
+        profile_data = (
+            response.data
+        )  # maybe_single() often puts data directly here in sync mode
+        if profile_data and profile_data.get("role") == "admin":
+            is_admin = True
+            logger.info(f"User {user_id} confirmed as admin.")
+        elif profile_data:
+            logger.warning(
+                f"User {user_id} found but role is not admin (role: {profile_data.get('role')}). Access denied."
+            )
+        else:
+            logger.warning(
+                f"Profile not found for user ID: {user_id}. Denying admin access."
+            )
+
+    except Exception as e:
+        logger.error(
+            f"Database error while checking admin role for user {user_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not verify user permissions due to a database error.",
         )
 
-        if response.data and response.data.get("role") == "admin":
-            return user
+    if not is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User does not have admin role",
+            detail="Insufficient privileges. Admin role required.",
         )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Failed to verify admin role: {str(e)}",
-        )
+
+    return current_user
 
 
 class UploadRequest(BaseModel):

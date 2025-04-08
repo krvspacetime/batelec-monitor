@@ -1,6 +1,6 @@
 from typing import List, Optional
+
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 
 class Personnel(BaseModel):
@@ -28,15 +28,21 @@ class Barangay(BaseModel):
 class AffectedArea(BaseModel):
     id: Optional[int] = None
     name: str = Field(..., description="Name of the affected area")
-    barangays: List[Barangay] = Field(default_factory=list, description="List of barangays in the affected area")
+    barangays: List[Barangay] = Field(
+        default_factory=list, description="List of barangays in the affected area"
+    )
 
 
 class PowerInterruptionNotice(BaseModel):
     id: Optional[int] = None
     control_no: str = Field(..., description="Control number of the notice")
     date_issued: str = Field(..., description="Date the notice was issued")
-    personnel: List[Personnel] = Field(default_factory=list, description="List of personnel involved")
-    affected_customers: List[AffectedCustomer] = Field(default_factory=list, description="List of affected customers")
+    personnel: List[Personnel] = Field(
+        default_factory=list, description="List of personnel involved"
+    )
+    affected_customers: List[AffectedCustomer] = Field(
+        default_factory=list, description="List of affected customers"
+    )
     specific_activities: List[SpecificActivity] = Field(
         default_factory=list, description="List of specific activities"
     )
@@ -55,7 +61,9 @@ class PowerInterruptionData(BaseModel):
     affected_areas: List[AffectedArea] = Field(
         default_factory=list, description="List of affected areas"
     )
-    affected_customers: List[AffectedCustomer] = Field(default_factory=list, description="List of affected customers")
+    affected_customers: List[AffectedCustomer] = Field(
+        default_factory=list, description="List of affected customers"
+    )
     affected_line: str = Field(..., description="Line affected by the interruption")
     specific_activities: List[SpecificActivity] = Field(
         default_factory=list, description="List of specific activities"
