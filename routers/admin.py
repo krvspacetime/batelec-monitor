@@ -12,7 +12,7 @@ from supabase import (  # Import PostgrestAPIResponse for type hints
 )
 
 from ai.gemini import get_structured_response
-from db.supabase import get_supabase, verify_admin_role
+from db.supabase import get_supabase, list_files_in_folder, verify_admin_role
 
 # Assuming your AI response model is defined elsewhere, e.g.,
 # from ai.models import StructuredResponse
@@ -460,38 +460,73 @@ async def admin(
                     logger.debug(
                         f"Linking Area ID {area_id} ('{area_name}') to Data ID {record_id}"
                     )
-                    supabase.table("data_areas").insert(
-                        {"data_id": record_id, "area_id": area_id}
-                    ).execute()  # Add error check/log?
+                    try:  # Add try/except for junction table insert
+                        supabase.table("data_areas").insert(
+                            {"data_id": record_id, "area_id": area_id}
+                        ).execute()
+                    except Exception as link_exc:
+                        logger.error(
+                            f"Failed to link Area ID {area_id} to Data ID {record_id}: {link_exc}",
+                            exc_info=True,
+                        )
+                        # Decide if you should continue or raise an error
 
                     # Process Barangays for this Area
-                    if area_data.get("barangays"):
+                    barangays_list = area_data.get(
+                        "barangays", []
+                    )  # Default to empty list
+                    if barangays_list:
                         logger.debug(
-                            f"Processing {len(area_data['barangays'])} barangays for area ID {area_id} ('{area_name}')."
+                            f"Processing {len(barangays_list)} barangays for area ID {area_id} ('{area_name}')."
                         )
-                        for bgy_name in area_data["barangays"]:
-                            if not bgy_name:
+                        # CHANGE 1: Iterate over the list, expecting dictionaries
+                        for bgy_data_dict in barangays_list:
+                            # CHANGE 2: Check if item is a dictionary and extract the 'name' string
+                            if not isinstance(bgy_data_dict, dict):
                                 logger.warning(
-                                    f"Skipping empty barangay name in area '{area_name}'."
+                                    f"Skipping invalid barangay data item (not a dict): {bgy_data_dict} in area '{area_name}'"
                                 )
                                 continue
-                            # Check if barangay exists *for this area*
-                            bgy_check = (
-                                supabase.table("barangays")
-                                .select("id")
-                                .eq("name", bgy_name)
-                                .eq("area_id", area_id)
-                                .execute()
-                            )
-                            if not bgy_check.data:
-                                # Insert new barangay linked to area
-                                logger.debug(
-                                    f"Inserting new Barangay '{bgy_name}' for Area ID {area_id}"
+
+                            actual_bgy_name = bgy_data_dict.get("name")
+
+                            if not actual_bgy_name or not isinstance(
+                                actual_bgy_name, str
+                            ):
+                                logger.warning(
+                                    f"Skipping barangay with missing or invalid name: {bgy_data_dict} in area '{area_name}'."
                                 )
-                                supabase.table("barangays").insert(
-                                    {"name": bgy_name, "area_id": area_id}
-                                ).execute()  # Add error check/log?
-                            # else: logger.debug(f"Barangay '{bgy_name}' already exists for Area ID {area_id}")
+                                continue
+
+                            # CHANGE 3: Use 'actual_bgy_name' for checking and inserting
+                            try:  # Add try/except for DB operations
+                                # Check if barangay exists *for this area* using the extracted name
+                                bgy_check = (
+                                    supabase.table("barangays")
+                                    .select("id")
+                                    .eq("name", actual_bgy_name)  # Use extracted name
+                                    .eq("area_id", area_id)
+                                    .limit(1)  # Only need to know if one exists
+                                    .execute()
+                                )
+                                if not bgy_check.data:
+                                    # Insert new barangay linked to area using the extracted name
+                                    logger.debug(
+                                        f"Inserting new Barangay '{actual_bgy_name}' for Area ID {area_id}"
+                                    )
+                                    supabase.table("barangays").insert(
+                                        {
+                                            "name": actual_bgy_name,
+                                            "area_id": area_id,
+                                        }  # Use extracted name
+                                    ).execute()
+                                # else: logger.debug(f"Barangay '{actual_bgy_name}' already exists for Area ID {area_id}")
+                            except Exception as bgy_exc:
+                                logger.error(
+                                    f"Failed processing barangay '{actual_bgy_name}' for Area ID {area_id}: {bgy_exc}",
+                                    exc_info=True,
+                                )
+                                # Decide if you should continue or raise an error
         else:
             logger.info("No affected areas listed in AI data for this record.")
 
@@ -501,10 +536,19 @@ async def admin(
             logger.info(
                 f"Linking {len(data_dict['affected_customers'])} top-level affected customers to record ID: {record_id}"
             )
-            for cust_name in data_dict["affected_customers"]:
-                if not cust_name:
+            for cust_data_dict in data_dict["affected_customers"]:
+                # Ensure 'name' is extracted correctly here too
+                cust_name = (
+                    cust_data_dict.get("name")
+                    if isinstance(cust_data_dict, dict)
+                    else cust_data_dict
+                )
+                if not cust_name or not isinstance(cust_name, str):
+                    logger.warning(
+                        f"Skipping invalid customer data item: {cust_data_dict}"
+                    )
                     continue
-                # Get-or-Create Customer (reusing helper)
+                # Make sure get_or_create_related_item receives {"name": cust_name}
                 customer_id = await get_or_create_related_item(
                     supabase,
                     logger,
@@ -521,23 +565,32 @@ async def admin(
                         {"data_id": record_id, "customer_id": customer_id}
                     ).execute()  # Add error check/log?
 
-        # --- 9. Link Specific Activities (Top Level) ---
-        # Note: Re-evaluate if this is needed if activities are *only* under notices
-        if data_dict.get("specific_activities"):
-            logger.info(
-                f"Linking {len(data_dict['specific_activities'])} top-level specific activities to record ID: {record_id}"
-            )
-            for act_name in data_dict["specific_activities"]:
-                if not act_name:
-                    continue
-                # Get-or-Create Activity (reusing helper)
-                activity_id = await get_or_create_related_item(
-                    supabase,
-                    logger,
-                    "specific_activities",
-                    {"name": act_name},
-                    ["name"],
+            # --- 9. Link Specific Activities (Top Level) ---
+            # Note: Re-evaluate if this is needed if activities are *only* under notices
+            if data_dict.get("specific_activities"):
+                logger.info(
+                    f"Linking {len(data_dict['specific_activities'])} top-level specific activities to record ID: {record_id}"
                 )
+                for act_data_dict in data_dict["specific_activities"]:
+                    # Ensure 'name' is extracted correctly here too
+                    act_name = (
+                        act_data_dict.get("name")
+                        if isinstance(act_data_dict, dict)
+                        else act_data_dict
+                    )
+                    if not act_name or not isinstance(act_name, str):
+                        logger.warning(
+                            f"Skipping invalid activity data item: {act_data_dict}"
+                        )
+                        continue
+                    # Make sure get_or_create_related_item receives {"name": act_name}
+                    activity_id = await get_or_create_related_item(
+                        supabase,
+                        logger,
+                        "specific_activities",
+                        {"name": act_name},
+                        ["name"],
+                    )
                 if activity_id:
                     # Link Activity to Data
                     logger.debug(
@@ -630,3 +683,20 @@ async def get_or_create_related_item(
             exc_info=True,
         )
         return None  # Indicate failure
+
+
+@router.get("/files")
+async def get_files_from_bucket(
+    supabase: Client = Depends(get_supabase),
+    bucket_name: str = "scraper-data",
+    folder_path: str | None = None,
+    target_most_recent: bool = False,
+    files_only: bool = False,
+):
+    try:
+        response = list_files_in_folder(
+            supabase, bucket_name, folder_path, files_only, target_most_recent
+        )
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
