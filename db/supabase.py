@@ -12,6 +12,8 @@ from gotrue import UserResponse
 from pydantic import BaseModel, Field
 from supabase import Client, PostgrestAPIResponse, create_client
 
+from ai.utils import extract_post_data
+
 # Load environment variables
 load_dotenv()
 
@@ -345,9 +347,7 @@ def list_files_in_folder(
         ValueError: If target_most_recent is True and no valid
                     timestamped folders are found at the root.
     """
-    target_path: str | None = folder_path
-
-    if not target_path and target_most_recent:
+    if not folder_path and target_most_recent:
         logger.info(f"Finding most recent folder in bucket '{bucket_name}'...")
         try:
             # List items at the root to find folders
@@ -385,8 +385,8 @@ def list_files_in_folder(
                     f"No valid timestamped folders found in bucket '{bucket_name}'."
                 )
 
-            target_path = most_recent_folder.get("name")
-            logger.info(f"Identified most recent folder: '{target_path}'")
+            folder_path = most_recent_folder.get("name")
+            logger.info(f"Identified most recent folder: '{folder_path}'")
 
         except Exception as e:
             logger.error(
@@ -398,34 +398,56 @@ def list_files_in_folder(
             return []  # Option 2: Return empty on error finding folder
 
     # If no path determined by either argument or finding most recent, list root
-    if target_path is None:
-        target_path = ""  # Default to root if nothing else specified
+    if folder_path is None:
+        folder_path = ""  # Default to root if nothing else specified
         logger.info(f"No specific folder targeted, listing root of '{bucket_name}'.")
 
-    logger.info(f"Listing items in bucket '{bucket_name}' at path: '{target_path}'")
+    logger.info(f"Listing items in bucket '{bucket_name}' at path: '{folder_path}'")
     try:
-        response = supabase.storage.from_(bucket_name).list(path=target_path)
+        response = supabase.storage.from_(bucket_name).list(path=folder_path)
         if not response:
             # This could mean the folder doesn't exist or is empty
             logger.warning(
-                f"No items found in path '{target_path}' or path does not exist in bucket '{bucket_name}'."
+                f"No items found in path '{folder_path}' or path does not exist in bucket '{bucket_name}'."
             )
             return []
 
         if files_only:
             # Filter out items that look like folders (id is None)
             files = [item for item in response if item.get("id") is not None]
-            logger.info(f"Found {len(files)} file(s) in path '{target_path}'.")
+            logger.info(f"Found {len(files)} file(s) in path '{folder_path}'.")
             return files
         else:
             logger.info(
-                f"Found {len(response)} item(s) (files and folders) in path '{target_path}'."
+                f"Found {len(response)} item(s) (files and folders) in path '{folder_path}'."
             )
             return response
 
     except Exception as e:
         logger.error(
-            f"Error listing items in bucket '{bucket_name}' at path '{target_path}': {e}",
+            f"Error listing items in bucket '{bucket_name}' at path '{folder_path}': {e}",
             exc_info=True,
         )
         return []
+
+
+def read_file_from_bucket(
+    supabase: Client,
+    file_path: str,
+    bucket_name: str = "scraper-data",
+):
+    try:
+        # Read json file
+        response = supabase.storage.from_(bucket_name).download(file_path)
+        response = response.decode("utf8").replace("'", '"')
+        response = json.loads(response)
+        return extract_post_data(response)
+    except Exception as e:
+        logger.error(
+            f"Error reading file from bucket '{bucket_name}' at path '{file_path}': {e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve file from bucket '{bucket_name}' at path '{file_path}': {str(e)}",
+        )

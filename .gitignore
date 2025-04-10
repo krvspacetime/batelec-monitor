@@ -7,3 +7,4 @@ cache/*
 fb/*.html
 fb/*.json
 *.log
+*.md

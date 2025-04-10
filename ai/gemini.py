@@ -7,7 +7,8 @@ from google import genai
 from google.genai import types
 
 from models.models import PowerInterruptionData
-from utils.utils import cache_to_file, get_cached_data
+from ai.utils import upload_images_from_urls
+
 
 load_dotenv()
 
@@ -18,48 +19,21 @@ config = types.GenerateContentConfig(
     response_schema=PowerInterruptionData,
 )
 
-images = ["data/img1.jpg", "data/img2.jpg", "data/img3.jpg"]
-
-
-def upload_content_images(imgs: List[str | Path]):
-    images = []
-    for img in imgs:
-        image = client.files.upload(file=img)
-        images.append(image)
-
-    return images
-
 
 def get_structured_response(
-    force: bool = False,
     fb_post_text: str | None = None,
     fb_post_images: List[str | Path] | None = None,
 ) -> PowerInterruptionData:
-    if fb_post_images is None:
-        fb_post_images = ["data/img1.jpg", "data/img2.jpg", "data/img3.jpg"]
-
-    # Validate that all image paths exist
-    for img_path in fb_post_images:
-        if not Path(img_path).exists():
-            raise ValueError(f"Image file not found: {img_path}")
-
-    filename = None
     contents = []
     if fb_post_text:
         contents.append(fb_post_text)
     if fb_post_images:
-        contents.extend(upload_content_images(fb_post_images))
-    if force:
-        response = client.models.generate_content(
-            # model="gemini-2.5-pro-exp-03-25",
-            model="gemini-2.0-flash",
-            contents=contents,
-            config=config,
-        )
-        response = response.parsed.model_dump()
-        filename = f"cached_data_{response['date']}_{response['start_time']}_{response['end_time']}.json"
-        cache_to_file(response, filename)
-        return PowerInterruptionData(**response)
-    else:
-        cached_response = get_cached_data()
-        return PowerInterruptionData(**cached_response)
+        contents.extend(upload_images_from_urls(client, fb_post_images))
+    response = client.models.generate_content(
+        # model="gemini-2.5-pro-exp-03-25",
+        model="gemini-2.0-flash",
+        contents=contents,
+        config=config,
+    )
+    response = response.parsed.model_dump()
+    return PowerInterruptionData(**response)

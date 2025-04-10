@@ -6,7 +6,7 @@ from supabase import Client
 
 # from supabase.lib.errors import StorageApiError # If available
 from db.supabase import UploadRequest, get_supabase, upload_to_bucket
-from fb.scraper import scrape_facebook_page
+from scraper.scraper import scrape_facebook_page
 
 router = APIRouter(prefix="/storage", tags=["Storage"])
 

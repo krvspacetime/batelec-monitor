@@ -2,14 +2,24 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends
 from starlette import status
+from supabase import Client
 
 # Import the improved scraper implementation
-from fb.scraper import scrape_facebook_page
+from scraper.scraper import scrape_facebook_page
+from scraper.scrape_utils import check_rate_limit
+from db.supabase import get_supabase
+from models.scraper import (
+    ScrapeRequest,
+    ScrapeResponse,
+    ScrapeStatusResponse,
+    PostData,
+    PostsResponse,
+)
+
 
 # Configure logging
 logging.basicConfig(
@@ -29,82 +39,8 @@ router = APIRouter(prefix="/scrape", tags=["Scraper"])
 # Store active scraping tasks to prevent duplicates
 active_scraping_tasks = {}
 
-# Rate limiting variables
-request_timestamps = []
-RATE_LIMIT_WINDOW = 3600  # 1 hour in seconds
-MAX_REQUESTS_PER_WINDOW = 10  # Maximum 10 requests per hour
 
-
-class ScrapeRequest(BaseModel):
-    url: str = Field(..., description="Facebook page URL to scrape")
-    max_scrolls: int = Field(15, description="Maximum number of page scrolls")
-    sleep_time: int = Field(5, description="Sleep time between scrolls in seconds")
-    output_dir: Optional[str] = Field(
-        None, description="Directory to save output files (optional)"
-    )
-    headless: bool = Field(True, description="Run browser in headless mode")
-    proxy: Optional[str] = Field(
-        None, description="Proxy server to use (format: 'http://user:pass@host:port')"
-    )
-    save_html: bool = Field(False, description="Whether to save HTML output")
-    save_json: bool = Field(True, description="Whether to save JSON output")
-
-
-class ScrapeResponse(BaseModel):
-    task_id: str
-    status: str
-    message: str
-    timestamp: str
-
-
-class ScrapeStatusResponse(BaseModel):
-    task_id: str
-    status: str
-    message: str
-    result: Optional[Dict] = None
-    error: Optional[str] = None
-    last_updated: Optional[str] = None
-
-
-class PostData(BaseModel):
-    text: str = ""
-    img_links: List[str] = []
-    timestamp: Optional[str] = None
-
-
-class PostsResponse(BaseModel):
-    task_id: str
-    status: str
-    posts: List[PostData] = []
-    stats: Optional[Dict] = None
-
-
-def check_rate_limit(request: Request) -> bool:
-    """Check if the request exceeds rate limits"""
-    client_ip = request.client.host
-    current_time = time.time()
-
-    # Remove timestamps older than the window
-    global request_timestamps
-    request_timestamps = [
-        (ip, ts)
-        for ip, ts in request_timestamps
-        if current_time - ts < RATE_LIMIT_WINDOW
-    ]
-
-    # Count requests from this IP in the window
-    ip_requests = sum(1 for ip, _ in request_timestamps if ip == client_ip)
-
-    # Check if limit exceeded
-    if ip_requests >= MAX_REQUESTS_PER_WINDOW:
-        return False
-
-    # Add current request to timestamps
-    request_timestamps.append((client_ip, current_time))
-    return True
-
-
-async def scrape_task(task_id: str, scrape_params: ScrapeRequest):
+def scrape_task(supabase: Client, task_id: str, scrape_params: ScrapeRequest):
     """Background task to handle Facebook page scraping"""
     try:
         # Update task status to processing before starting the actual work
@@ -151,8 +87,7 @@ async def scrape_task(task_id: str, scrape_params: ScrapeRequest):
 
         scrape_result = scrape_facebook_page(
             url=scrape_params.url,
-            output_html_file=html_file,
-            output_json_file=json_file,
+            supabase=supabase,
             sleep_time=scrape_params.sleep_time,
             max_scrolls=scrape_params.max_scrolls,
             headless=scrape_params.headless,
@@ -215,10 +150,11 @@ async def scrape_task(task_id: str, scrape_params: ScrapeRequest):
 @router.post(
     "/facebook", response_model=ScrapeResponse, status_code=status.HTTP_202_ACCEPTED
 )
-async def scrape_facebook(
+def scrape_facebook(
     request: Request,
     scrape_request: ScrapeRequest,
     background_tasks: BackgroundTasks,
+    supabase: Client = Depends(get_supabase),
 ):
     """Endpoint to initiate Facebook page scraping"""
     # Check rate limiting
@@ -267,7 +203,7 @@ async def scrape_facebook(
     }
 
     # Add task to background tasks
-    background_tasks.add_task(scrape_task, task_id, scrape_request)
+    background_tasks.add_task(scrape_task, supabase, task_id, scrape_request)
 
     logger.info(f"Started scraping task {task_id} for URL: {scrape_request.url}")
 
@@ -280,7 +216,7 @@ async def scrape_facebook(
 
 
 @router.get("/status/{task_id}", response_model=ScrapeStatusResponse)
-async def get_scrape_status(task_id: str):
+def get_scrape_status(task_id: str):
     """Get the status of a scraping task
 
     This endpoint returns immediately with the current status of the task,
